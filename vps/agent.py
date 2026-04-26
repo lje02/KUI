@@ -172,6 +172,9 @@ def build_singbox_config(nodes, unlock_proxy):
         except Exception:
             pass
 
+    # 存储当前活跃的证书，用于后续清理
+    active_certs = []
+
     for node in nodes:
         in_tag = f"in-{node['id']}"
         
@@ -198,6 +201,8 @@ def build_singbox_config(nodes, unlock_proxy):
             cert_path = f"/opt/kui/hy2_{node['id']}_cert.pem"
             key_path = f"/opt/kui/hy2_{node['id']}_key.pem"
             sni = node.get("sni", "www.chiba-u.ac.jp") 
+            
+            active_certs.extend([f"hy2_{node['id']}_cert.pem", f"hy2_{node['id']}_key.pem"])
 
             if not os.path.exists(cert_path) or not os.path.exists(key_path):
                 cmd = f'openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) -keyout {key_path} -out {cert_path} -days 3650 -subj "/O=GlobalSign/CN={sni}" 2>/dev/null'
@@ -206,7 +211,8 @@ def build_singbox_config(nodes, unlock_proxy):
 
             singbox_config["inbounds"].append({
                 "type": "hysteria2", "tag": in_tag, "listen": "::", "listen_port": int(node["port"]),
-                "users": [{"password": node["uuid"]}], "up_mbps": 1000, "down_mbps": 1000,
+                "users": [{"password": node["uuid"]}],
+                # 修复点：已彻底移除 up_mbps 和 down_mbps 废弃字段
                 "tls": { "enabled": True, "alpn": ["h3"], "certificate_path": cert_path, "key_path": key_path }
             })
             
@@ -224,6 +230,15 @@ def build_singbox_config(nodes, unlock_proxy):
                 singbox_config["outbounds"].append({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) })
             
             singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
+
+    # 【新增功能】自动清理已被删除的 HY2 节点证书残留
+    try:
+        for filename in os.listdir("/opt/kui/"):
+            if filename.startswith("hy2_") and filename.endswith(".pem"):
+                if filename not in active_certs:
+                    os.remove(os.path.join("/opt/kui/", filename))
+    except Exception:
+        pass
 
     new_config_str = json.dumps(singbox_config, indent=2)
     old_config_str = ""
