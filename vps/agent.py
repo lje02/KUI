@@ -25,7 +25,6 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)'
 }
 
-# 内存缓存：记录上一次成功上报的 iptables 字节数，用于计算增量(Delta)
 last_reported_bytes = {}
 
 def get_system_status():
@@ -37,9 +36,7 @@ def get_system_status():
         return {"cpu": 0, "mem": 0}
 
 def get_port_traffic(port, protocol="tcp"):
-    """安全地读取 iptables 获取特定端口的上下行字节总和"""
     try:
-        # 自动注入 iptables 统计规则 (若不存在则添加，不影响其他应用)
         check_in = f"iptables -C INPUT -p {protocol} --dport {port}"
         if subprocess.run(check_in, shell=True, stderr=subprocess.DEVNULL).returncode != 0:
             subprocess.run(f"iptables -I INPUT -p {protocol} --dport {port}", shell=True)
@@ -48,7 +45,6 @@ def get_port_traffic(port, protocol="tcp"):
         if subprocess.run(check_out, shell=True, stderr=subprocess.DEVNULL).returncode != 0:
             subprocess.run(f"iptables -I OUTPUT -p {protocol} --sport {port}", shell=True)
 
-        # 读取匹配端口的统计数据 (-x 精确字节数)
         out_in = subprocess.check_output(f"iptables -nvx -L INPUT | grep 'dpt:{port}'", shell=True).decode()
         in_bytes = sum([int(line.split()[1]) for line in out_in.strip().split('\n') if line])
 
@@ -64,7 +60,6 @@ def report_status(current_nodes):
     status = get_system_status()
     status["ip"] = VPS_IP
     
-    # 计算本周期内的流量增量
     node_traffic_deltas = []
     current_ids = set()
 
@@ -78,16 +73,11 @@ def report_status(current_nodes):
         last_bytes = last_reported_bytes.get(nid, 0)
         
         delta = current_bytes - last_bytes
-        # 处理 iptables 计数器因服务器重启归零的情况
-        if delta < 0: 
-            delta = current_bytes
-            
-        if delta > 0:
-            node_traffic_deltas.append({ "id": nid, "delta_bytes": delta })
+        if delta < 0: delta = current_bytes
+        if delta > 0: node_traffic_deltas.append({ "id": nid, "delta_bytes": delta })
         
         last_reported_bytes[nid] = current_bytes
 
-    # 清理已删除节点的缓存
     for old_id in list(last_reported_bytes.keys()):
         if old_id not in current_ids:
             del last_reported_bytes[old_id]
@@ -106,20 +96,48 @@ def fetch_and_apply_configs():
         res = urllib.request.urlopen(req, timeout=10)
         data = json.loads(res.read().decode('utf-8'))
         if data.get("success"):
-            nodes = data["configs"]
-            build_singbox_config(nodes)
+            server_info = data.get("server", {})
+            nodes = data.get("configs", [])
+            build_singbox_config(nodes, server_info.get("unlock_proxy", ""))
             return nodes
     except Exception:
         pass
     return []
 
-def build_singbox_config(nodes):
+def build_singbox_config(nodes, unlock_proxy):
     singbox_config = {
         "log": {"level": "warn"},
         "inbounds": [],
         "outbounds": [{"type": "direct", "tag": "direct-out"}],
         "route": {"rules": []}
     }
+
+    # ======== 核心：注入流媒体解锁路由策略 ========
+    if unlock_proxy and ":" in unlock_proxy:
+        parts = unlock_proxy.strip().split(":")
+        try:
+            proxy_ip = parts[0]
+            proxy_port = int(parts[1])
+            # 添加 Socks5 出站
+            singbox_config["outbounds"].append({
+                "type": "socks",
+                "tag": "media-unlock",
+                "server": proxy_ip,
+                "server_port": proxy_port
+            })
+            # 无需 geosite.db，直接后缀匹配，轻量高效
+            singbox_config["route"]["rules"].append({
+                "domain_suffix": [
+                    "netflix.com", "netflix.net", "nflximg.net", "nflxvideo.net", "nflxext.com", "nflxso.net",
+                    "disneyplus.com", "bamgrid.com", "dssott.com",
+                    "openai.com", "chatgpt.com", "ai.com",
+                    "spotify.com", "hbo.com", "hbomax.com"
+                ],
+                "outbound": "media-unlock"
+            })
+        except Exception:
+            pass
+    # ============================================
 
     for node in nodes:
         in_tag = f"in-{node['id']}"
@@ -171,6 +189,8 @@ def build_singbox_config(nodes):
                 singbox_config["outbounds"].append(outbound)
             else:
                 singbox_config["outbounds"].append({ "type": "direct", "tag": out_tag, "override_address": node["target_ip"], "override_port": int(node["target_port"]) })
+            
+            # 这里是通用出站，如果前面有 media-unlock 匹配，它会优先走流媒体
             singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
 
     new_config_str = json.dumps(singbox_config, indent=2)
@@ -187,8 +207,6 @@ def build_singbox_config(nodes):
 if __name__ == "__main__":
     current_active_nodes = []
     while True:
-        # 先拉取并应用配置（从而确定当前哪些节点是存活的）
         current_active_nodes = fetch_and_apply_configs() or current_active_nodes
-        # 再上报这些存活节点的流量增量
         report_status(current_active_nodes)
         time.sleep(60)
