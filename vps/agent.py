@@ -7,8 +7,12 @@ import subprocess
 CONF_FILE = "/opt/kui/config.json"
 SINGBOX_CONF_PATH = "/etc/sing-box/config.json"
 
-with open(CONF_FILE, 'r') as f:
-    env = json.load(f)
+try:
+    with open(CONF_FILE, 'r') as f:
+        env = json.load(f)
+except Exception:
+    print("Agent 配置读取失败，请检查安装参数。")
+    exit(1)
 
 API_URL = env["api_url"]
 REPORT_URL = env["report_url"]
@@ -20,7 +24,7 @@ def get_system_status():
         cpu = float(os.popen("top -bn1 | grep load | awk '{printf \"%.2f\", $(NF-2)}'").read().strip())
         mem = float(os.popen("free -m | awk 'NR==2{printf \"%.2f\", $3*100/$2 }'").read().strip())
         return {"cpu": int(cpu), "mem": mem}
-    except:
+    except Exception:
         return {"cpu": 0, "mem": 0}
 
 def report_status():
@@ -29,7 +33,7 @@ def report_status():
     req = urllib.request.Request(REPORT_URL, data=json.dumps(status).encode('utf-8'), headers={'Content-Type': 'application/json'})
     try:
         urllib.request.urlopen(req, timeout=5)
-    except:
+    except Exception:
         pass
 
 def fetch_and_apply_configs():
@@ -39,22 +43,35 @@ def fetch_and_apply_configs():
         data = json.loads(res.read().decode('utf-8'))
         if data.get("success"):
             build_singbox_config(data["configs"])
-    except Exception as e:
+    except Exception:
         pass
 
-def build_singbox_config(kui_nodes):
+def build_singbox_config(nodes):
     singbox_config = {
         "log": {"level": "warn"},
         "inbounds": [],
-        "outbounds": [{"type": "direct", "tag": "direct"}],
+        "outbounds": [{"type": "direct", "tag": "direct-out"}],
         "route": {"rules": []}
     }
 
-    for node in kui_nodes:
-        if node["protocol"] == "Reality":
+    for node in nodes:
+        in_tag = f"in-{node['id']}"
+        
+        # 协议 1: VLESS 原版
+        if node["protocol"] == "VLESS":
             singbox_config["inbounds"].append({
                 "type": "vless",
-                "tag": f"in-{node['id']}",
+                "tag": in_tag,
+                "listen": "::",
+                "listen_port": int(node["port"]),
+                "users": [{"uuid": node["uuid"]}]
+            })
+            
+        # 协议 2: VLESS-Reality
+        elif node["protocol"] == "Reality":
+            singbox_config["inbounds"].append({
+                "type": "vless",
+                "tag": in_tag,
                 "listen": "::",
                 "listen_port": int(node["port"]),
                 "users": [{"uuid": node["uuid"], "flow": "xtls-rprx-vision"}],
@@ -69,25 +86,58 @@ def build_singbox_config(kui_nodes):
                     }
                 }
             })
-        elif node["protocol"] == "VLESS":
+            
+        # 协议 3: 任意门 / 链式代理
+        elif node["protocol"] == "dokodemo-door":
+            # 统一入站监听
             singbox_config["inbounds"].append({
-                "type": "vless",
-                "tag": f"in-{node['id']}",
+                "type": "direct", 
+                "tag": in_tag,
                 "listen": "::",
-                "listen_port": int(node["port"]),
-                "users": [{"uuid": node["uuid"]}]
+                "listen_port": int(node["port"])
             })
-        elif node["protocol"] == "Hysteria2":
-            # Hysteria2 需要证书，此处简化为自签或依赖用户预配置
-            singbox_config["inbounds"].append({
-                "type": "hysteria2",
-                "tag": f"in-{node['id']}",
-                "listen": "::",
-                "listen_port": int(node["port"]),
-                "users": [{"password": node["uuid"]}],
-                "tls": {"enabled": True, "alpn": ["h3"]}
+            
+            out_tag = f"out-{node['id']}"
+            
+            # 判断转发模式
+            if node.get("relay_type") == "internal" and node.get("chain_target"):
+                t = node["chain_target"]
+                outbound = {
+                    "type": t["protocol"].lower(),
+                    "tag": out_tag,
+                    "server": t["ip"],
+                    "server_port": int(t["port"]),
+                    "uuid": t["uuid"]
+                }
+                # 如果内部目标是 Reality，补齐客户端 TLS 信息
+                if t["protocol"] == "Reality":
+                    outbound["tls"] = {
+                        "enabled": True,
+                        "server_name": t["sni"],
+                        "reality": {
+                            "enabled": True,
+                            "public_key": t["public_key"],
+                            "short_id": t["short_id"]
+                        }
+                    }
+                singbox_config["outbounds"].append(outbound)
+                
+            else:
+                # 经典外网端口转发
+                singbox_config["outbounds"].append({
+                    "type": "direct",
+                    "tag": out_tag,
+                    "override_address": node["target_ip"],
+                    "override_port": int(node["target_port"])
+                })
+                
+            # 将该任意门的入站流量全部送往专有出站
+            singbox_config["route"]["rules"].append({
+                "inbound": [in_tag],
+                "outbound": out_tag
             })
 
+    # 文件比对防抖更新
     new_config_str = json.dumps(singbox_config, indent=2)
     old_config_str = ""
     if os.path.exists(SINGBOX_CONF_PATH):
@@ -103,4 +153,5 @@ if __name__ == "__main__":
     while True:
         report_status()
         fetch_and_apply_configs()
+        # D1 额度极高，可以设定为每 60 秒上报并同步一次
         time.sleep(60)
