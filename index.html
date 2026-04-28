@@ -22,8 +22,9 @@
         <div v-else>
             <div class="bg-white p-5 rounded-lg shadow-sm flex flex-col md:flex-row justify-between items-center border-b-4 border-black mb-6">
                 <h1 class="text-2xl font-black mb-4 md:mb-0">Cluster <span class="text-gray-400 font-normal text-lg">Gateway</span></h1>
-                <div class="flex gap-4">
-                    <button @click="refreshData" class="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded text-sm font-medium transition">🔄 刷新数据</button>
+                <div class="flex gap-4 items-center">
+                    <span class="text-xs font-bold text-green-500 animate-pulse hidden md:inline-block">🟢 实时监控中</span>
+                    <button @click="refreshData" class="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded text-sm font-medium transition">🔄 手动刷新</button>
                     <button @click="logout" class="text-red-500 hover:bg-red-50 px-4 py-2 rounded text-sm transition">退出</button>
                 </div>
             </div>
@@ -188,7 +189,7 @@
     </div>
 
     <script>
-        const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+        const { createApp, ref, reactive, onMounted, onUnmounted, nextTick } = Vue;
         const toBase64Url = (uint8Array) => {
             let str = ''; for (let i = 0; i < uint8Array.length; i++) str += String.fromCharCode(uint8Array[i]);
             return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
@@ -208,6 +209,38 @@
                 const newVps = ref({ name: '', ip: '' });
                 const newNodeParams = reactive({}); 
                 const currentDomain = window.location.origin;
+
+                // 🌟 新增：页面可见性控制定时器
+                let pollTimer = null;
+
+                const startPolling = () => {
+                    if (!pollTimer) {
+                        pollTimer = setInterval(() => {
+                            if (isLoggedIn.value) refreshData();
+                        }, 30000); // 30秒刷新一次
+                    }
+                };
+
+                const stopPolling = () => {
+                    if (pollTimer) {
+                        clearInterval(pollTimer);
+                        pollTimer = null;
+                    }
+                };
+
+                // 监听页面切换事件 (休眠核心逻辑)
+                const handleVisibilityChange = () => {
+                    if (document.hidden) {
+                        // 页面被隐藏、最小化或切到别的标签，立刻停止拉取
+                        stopPolling();
+                    } else {
+                        // 切回页面，立即拉取一次最新数据，并重新启动定时器
+                        if (isLoggedIn.value) {
+                            refreshData();
+                            startPolling();
+                        }
+                    }
+                };
 
                 // 判断是否在线 (超过 10 分钟没上报变红)
                 const isOnline = (lastReport) => lastReport && (Date.now() - lastReport) < 10 * 60 * 1000;
@@ -236,14 +269,27 @@
 
                 const login = async () => {
                     const res = await fetch('/api/login', { method: 'POST', body: JSON.stringify({ password: password.value }) });
-                    if (res.ok) { token.value = password.value; localStorage.setItem('kui_token', token.value); isLoggedIn.value = true; refreshData(); } 
-                    else alert('密码错误');
+                    if (res.ok) { 
+                        token.value = password.value; 
+                        localStorage.setItem('kui_token', token.value); 
+                        isLoggedIn.value = true; 
+                        refreshData(); 
+                        startPolling(); // 登录成功开始轮询
+                    } else {
+                        alert('密码错误');
+                    }
                 };
-                const logout = () => { localStorage.removeItem('kui_token'); isLoggedIn.value = false; token.value = password.value = ''; };
 
-                // 🌟 新增：渲染 ECharts 流量趋势图
+                const logout = () => { 
+                    localStorage.removeItem('kui_token'); 
+                    isLoggedIn.value = false; 
+                    token.value = password.value = ''; 
+                    stopPolling(); // 退出登录停止轮询
+                };
+
+                // 渲染 ECharts 流量趋势图
                 const renderCharts = async () => {
-                    await nextTick(); // 等待 Vue 渲染 DOM 完毕
+                    await nextTick();
                     for (let vps of servers.value) {
                         try {
                             const res = await fetchApi(`/api/stats?ip=${vps.ip}`);
@@ -251,14 +297,14 @@
                             
                             const chartDom = document.getElementById('chart-' + vps.ip);
                             if (chartDom) {
-                                // 销毁旧实例防止内存泄漏
                                 let myChart = echarts.getInstanceByDom(chartDom);
-                                if (myChart) myChart.dispose();
-                                
-                                myChart = echarts.init(chartDom);
+                                if (!myChart) {
+                                    myChart = echarts.init(chartDom);
+                                    window.addEventListener('resize', () => myChart.resize());
+                                }
                                 
                                 const days = stats.map(s => s.day);
-                                const bytes = stats.map(s => (s.total_bytes / 1024 / 1024).toFixed(2)); // 转成 MB
+                                const bytes = stats.map(s => (s.total_bytes / 1024 / 1024).toFixed(2));
                                 
                                 myChart.setOption({
                                     tooltip: { trigger: 'axis', formatter: '{b}<br/>{c} MB' },
@@ -285,9 +331,6 @@
                                         }
                                     }]
                                 });
-                                
-                                // 让图表随浏览器窗口自适应
-                                window.addEventListener('resize', () => myChart.resize());
                             }
                         } catch (e) {
                             console.error("加载图表失败:", e);
@@ -307,7 +350,6 @@
                             }
                         });
                         
-                        // 数据加载完毕后渲染图表
                         renderCharts();
                     } catch(e) {}
                 };
@@ -361,7 +403,22 @@
                 const generateSubLink = (ip) => `${currentDomain}/api/sub?ip=${ip}&token=${token.value}`;
                 const copyCommand = (text, msg = '部署指令已复制！') => navigator.clipboard.writeText(text).then(() => alert(msg));
 
-                onMounted(() => { if (token.value) { isLoggedIn.value = true; refreshData(); } });
+                // 组件挂载时执行
+                onMounted(() => { 
+                    if (token.value) { 
+                        isLoggedIn.value = true; 
+                        refreshData(); 
+                        startPolling(); 
+                    } 
+                    // 绑定页面可见性事件
+                    document.addEventListener('visibilitychange', handleVisibilityChange);
+                });
+
+                // 组件卸载时清理（虽然在单页应用里不一定会触发，但是好习惯）
+                onUnmounted(() => {
+                    stopPolling();
+                    document.removeEventListener('visibilitychange', handleVisibilityChange);
+                });
 
                 return { isLoggedIn, password, login, logout, servers, nodes, newVps, newNodeParams, isOnline, formatBytes, formatDate, getTrafficPercent, refreshData, addVps, deleteVps, getNodesByIp, getAllOtherNodes, getVpsName, addNode, deleteNode, toggleNode, resetTraffic, generateCmd, generateSubLink, copyCommand };
             }
