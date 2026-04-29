@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KUI Serverless 聚合面板</title>
-    <!-- 核心依赖库：Vue3, TailwindCSS, NaCl(密码学), ECharts -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
@@ -14,7 +13,7 @@
 <body class="bg-gray-100 text-gray-800 font-sans p-4 md:p-8">
     <div id="app" v-cloak class="max-w-6xl mx-auto space-y-6">
         
-        <!-- ================= 动态防线：登录界面 ================= -->
+        <!-- ================= 登录界面 ================= -->
         <div v-if="!isLoggedIn" class="bg-white p-8 rounded-lg shadow-md max-w-sm mx-auto mt-20 border-t-4 border-black">
             <h2 class="text-2xl font-bold mb-6 text-center">系统准入</h2>
             <input v-model="loginUser" placeholder="用户名 (管理员为 admin)" class="w-full border p-3 rounded mb-4 focus:ring-2 focus:ring-black outline-none transition">
@@ -22,7 +21,7 @@
             <button @click="login" class="w-full bg-black text-white p-3 rounded hover:bg-gray-800 font-bold transition">登 入</button>
         </div>
 
-        <!-- ================= 控制中心：主视图 ================= -->
+        <!-- ================= 面板视图 ================= -->
         <div v-else>
             
             <!-- 统一顶部导航栏 -->
@@ -35,13 +34,13 @@
                 </div>
             </div>
 
-            <!-- ================= 管理员专属全量视图 ================= -->
+            <!-- ================= 管理员专属视图 ================= -->
             <div v-if="role === 'admin'" class="flex space-x-2 mb-6">
                 <button @click="activeTab = 'vps'" :class="activeTab === 'vps' ? 'bg-black text-white' : 'bg-white text-gray-500'" class="px-6 py-2 rounded-full font-bold shadow-sm transition">集群与节点</button>
                 <button @click="activeTab = 'users'" :class="activeTab === 'users' ? 'bg-black text-white' : 'bg-white text-gray-500'" class="px-6 py-2 rounded-full font-bold shadow-sm transition">多用户管理</button>
             </div>
 
-            <!-- [视图 A] 多用户统筹系统 -->
+            <!-- [Tab] 多用户管理 -->
             <div v-if="role === 'admin' && activeTab === 'users'" class="space-y-6">
                 <div class="bg-white p-6 rounded-lg border shadow-sm flex flex-col md:flex-row gap-4 items-end">
                     <div class="flex-1"><label class="block text-xs font-bold text-gray-500 mb-1">用户名</label><input v-model="newUser.username" placeholder="如: user01" class="w-full border p-2 rounded bg-gray-50"></div>
@@ -64,13 +63,13 @@
                             <div class="flex justify-between text-xs text-gray-500"><span>已用流量: {{ formatBytes(u.traffic_used) }}</span><span>上限: {{ u.traffic_limit > 0 ? formatBytes(u.traffic_limit) : '无限' }}</span></div>
                             <div class="w-full bg-gray-100 rounded-full h-2"><div :class="u.traffic_used >= u.traffic_limit && u.traffic_limit > 0 ? 'bg-red-500' : 'bg-black'" class="h-2 rounded-full" :style="{ width: getTrafficPercent(u.traffic_used, u.traffic_limit) + '%' }"></div></div>
                             <div class="text-[10px] text-gray-400">到期: {{ formatDate(u.expire_time) }}</div>
-                            <button v-if="u.traffic_used > 0" @click="resetUserTraffic(u.username)" class="text-[10px] text-blue-500 hover:underline">清空流量计</button>
+                            <button v-if="u.traffic_used > 0" @click="resetUserTraffic(u.username)" class="text-[10px] text-blue-500 hover:underline">清空流量</button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- [视图 B] 服务器与全协议节点系统 -->
+            <!-- [Tab] 集群与节点管理 -->
             <div v-if="role === 'admin' && activeTab === 'vps'" class="space-y-6">
                 <!-- 接入 VPS 终端 -->
                 <div class="bg-white p-6 rounded-lg border shadow-sm flex flex-col md:flex-row gap-4 items-end">
@@ -90,7 +89,7 @@
                             <!-- ECharts 图表容器 -->
                             <div :id="'chart-' + vps.ip" class="w-full h-32 mb-4"></div>
                             
-                            <!-- 全协议万能配置中心 -->
+                            <!-- 🌟 全协议万能配置中心 -->
                             <div class="bg-white p-3 border rounded border-dashed mt-2">
                                 <select v-model="newNodeParams[vps.ip].username" class="w-full border text-sm p-1.5 rounded mb-2 font-bold text-purple-600 outline-none">
                                     <option value="admin">👤 归属权: 管理员自身</option>
@@ -104,25 +103,30 @@
                                         <option value="TUIC">TUIC v5 (高并发秒开)</option>
                                         <option value="VLESS-Argo">VLESS Argo (免IP穿透救砖)</option>
                                         <option value="Socks5">Socks5 (通用标准代理)</option>
+                                        <option value="dokodemo-door">Dokodemo-door (转发)</option>
                                     </select>
                                     <input v-model="newNodeParams[vps.ip].port" type="number" placeholder="监听端口" class="border text-xs p-1.5 rounded w-20">
                                 </div>
 
-                                <!-- Reality 专属隐藏面板 -->
+                                <!-- 各协议专属配置 UI -->
                                 <div v-if="newNodeParams[vps.ip].protocol === 'Reality'" class="bg-gray-50 p-2 rounded mb-2 text-sm border">
                                     <input v-model="newNodeParams[vps.ip].sni" list="sni-recommend" placeholder="伪装域名: 支持手填或下拉" class="w-full border p-1.5 rounded outline-none text-xs">
                                     <datalist id="sni-recommend"><option value="www.apple.com"></option><option value="gateway.icloud.com"></option><option value="itunes.apple.com"></option><option value="www.microsoft.com"></option></datalist>
                                 </div>
 
-                                <!-- TUIC 专属隐藏面板 -->
                                 <div v-if="newNodeParams[vps.ip].protocol === 'TUIC'" class="bg-gray-50 p-2 rounded mb-2 text-sm border">
                                     <input v-model="newNodeParams[vps.ip].sni" placeholder="SNI 域名 (TUIC 必须填写, 如 www.bing.com)" class="w-full border p-1.5 rounded outline-none text-xs">
                                 </div>
 
-                                <!-- VLESS-Argo 专属隐藏面板 -->
-                                <div v-if="newNodeParams[vps.ip].protocol === 'VLESS-Argo'" class="bg-blue-50 p-2 rounded mb-2 text-sm border border-blue-200">
-                                    <input v-model="newNodeParams[vps.ip].sni" placeholder="Argo 临时域名 (xxx.trycloudflare.com)" class="w-full border p-1.5 rounded outline-none text-xs">
-                                    <p class="text-[10px] text-blue-600 mt-1 font-bold">⚠️ 需在 VPS 运行: cloudflared tunnel --url http://127.0.0.1:此端口号</p>
+                                <div v-if="newNodeParams[vps.ip].protocol === 'VLESS-Argo'" class="bg-blue-50 p-3 rounded mb-2 text-sm border border-blue-200">
+                                    <div class="font-bold text-blue-800 mb-1 flex items-center gap-1">⚡️ Cloudflared 隧道全自动穿透</div>
+                                    <p class="text-[10px] text-blue-600 leading-relaxed">配置下发后，VPS 将在后台静默运行隧道。<br>几秒钟内将自动抓取 <span class="font-mono bg-blue-100 px-1 rounded">.trycloudflare.com</span> 临时域名并回传至面板。</p>
+                                </div>
+
+                                <div v-if="newNodeParams[vps.ip].protocol === 'dokodemo-door'" class="bg-gray-50 p-2 rounded mb-2 text-sm border">
+                                    <div class="flex gap-4 font-bold text-[10px] mb-2"><label><input type="radio" v-model="newNodeParams[vps.ip].relay_type" value="external"> 公网目标转发</label><label><input type="radio" v-model="newNodeParams[vps.ip].relay_type" value="internal"> 内部节点链式</label></div>
+                                    <div v-if="newNodeParams[vps.ip].relay_type === 'external'" class="flex gap-2"><input v-model="newNodeParams[vps.ip].target_ip" placeholder="目标 IP" class="border p-1.5 rounded flex-1 outline-none text-xs"><input v-model="newNodeParams[vps.ip].target_port" placeholder="端口" class="border p-1.5 rounded w-16 outline-none text-xs"></div>
+                                    <select v-if="newNodeParams[vps.ip].relay_type === 'internal'" v-model="newNodeParams[vps.ip].target_id" class="border p-1.5 rounded w-full outline-none text-xs"><option value="">-- 选择目标节点 --</option><option v-for="n in getAllOtherNodes(vps.ip)" :value="n.id">{{ getVpsName(n.vps_ip) }} - {{ n.protocol }}:{{ n.port }}</option></select>
                                 </div>
 
                                 <button @click="addNode(vps.ip)" class="w-full bg-black text-white py-1.5 rounded text-xs font-bold hover:bg-gray-800 transition">配置加密下发</button>
@@ -131,12 +135,22 @@
 
                         <!-- 机器名下节点清单 -->
                         <div class="p-4 flex-1 bg-white">
-                            <div v-for="node in getNodesByIp(vps.ip)" :key="node.id" class="flex justify-between items-center border-b py-2 last:border-0 hover:bg-gray-50 px-2 rounded transition">
-                                <div>
-                                    <span class="font-bold text-sm">{{ node.protocol }} <span class="font-mono text-gray-500">#{{ node.port }}</span></span> 
-                                    <span class="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded border border-purple-100 ml-1">👤 {{ node.username }}</span>
+                            <div v-for="node in getNodesByIp(vps.ip)" :key="node.id" class="flex justify-between items-center border-b py-3 last:border-0 hover:bg-gray-50 px-2 rounded transition">
+                                <div class="flex-1 overflow-hidden pr-2">
+                                    <div class="flex items-center gap-1 mb-1">
+                                        <span class="font-bold text-sm">{{ node.protocol }} <span class="font-mono text-gray-500">#{{ node.port }}</span></span> 
+                                        <span class="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded border border-purple-100">👤 {{ node.username }}</span>
+                                    </div>
+                                    <!-- 动态状态回显 -->
+                                    <div v-if="node.protocol === 'VLESS-Argo'" class="text-[10px] p-1 rounded overflow-hidden text-ellipsis whitespace-nowrap max-w-full" :class="node.sni.includes('等待') ? 'bg-orange-50 text-orange-600 animate-pulse border border-orange-100 font-bold' : 'bg-green-50 text-green-700 border border-green-100 font-mono'">
+                                        Argo: {{ node.sni }}
+                                    </div>
+                                    <div v-if="node.protocol === 'TUIC' || node.protocol === 'Reality' || node.protocol === 'Hysteria2'" class="text-[10px] bg-gray-50 text-gray-500 p-1 rounded overflow-hidden text-ellipsis whitespace-nowrap max-w-full border">SNI: {{ node.sni }}</div>
+                                    <div v-if="node.protocol === 'dokodemo-door'" class="text-[10px] bg-gray-50 text-gray-500 p-1 rounded overflow-hidden text-ellipsis whitespace-nowrap max-w-full border">
+                                        {{ node.relay_type === 'external' ? `转发至: ${node.target_ip}:${node.target_port}` : `链式至内部节点` }}
+                                    </div>
                                 </div>
-                                <button @click="deleteNode(node.id)" class="text-red-400 text-xs hover:text-red-600 transition">删除</button>
+                                <button @click="deleteNode(node.id)" class="text-red-400 text-xs hover:text-red-600 font-bold px-2">删除</button>
                             </div>
                             <div v-if="getNodesByIp(vps.ip).length === 0" class="text-center text-gray-400 text-xs py-4">暂无节点配置</div>
                         </div>
@@ -195,7 +209,7 @@
                 const formatDate = (ts) => { if (!ts) return '永久'; const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
                 const getTrafficPercent = (used, limit) => { if (!limit || limit === 0) return 0; return Math.min((used / limit) * 100, 100); };
 
-                // --- 强力拦截与签名分装 Fetch ---
+                // --- 强力拦截与签名封装 Fetch ---
                 const fetchApi = async (url, options = {}) => {
                     const timestamp = Date.now().toString(); const signature = await generateHMAC(authKey.value, currentUser.value + timestamp);
                     options.headers = { ...options.headers, 'Authorization': `${btoa(currentUser.value)}.${timestamp}.${signature}` };
@@ -225,8 +239,7 @@
                     try {
                         const res = await fetchApi('/api/data'); const data = await res.json();
                         servers.value = data.servers || []; nodes.value = data.nodes || []; users.value = data.users || [];
-                        // 为新接入的机器赋初始参数对象
-                        servers.value.forEach(s => { if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'Reality', port: 443, username: 'admin', sni: '' }; });
+                        servers.value.forEach(s => { if(!newNodeParams[s.ip]) newNodeParams[s.ip] = { protocol: 'Reality', port: 443, username: 'admin', sni: '', relay_type: 'external' }; });
                         renderCharts();
                     } catch(e) {}
                 };
@@ -251,7 +264,7 @@
                 const addVps = async () => { await fetchApi('/api/vps', { method: 'POST', body: JSON.stringify(newVps.value) }); newVps.value = { name: '', ip: '' }; refreshData(); };
                 const deleteVps = async (ip) => { if(confirm('🧨 危险操作：确定要彻底移除该机器及名下所有节点和历史流量记录吗？')) { await fetchApi(`/api/vps?ip=${ip}`, { method: 'DELETE' }); refreshData(); } };
                 
-                // 🌟 最核心的 6 协议下发封装逻辑
+                // 🌟 最核心的 7 大协议配置全路由下发
                 const addNode = async (ip) => {
                     const p = newNodeParams[ip];
                     if(!p.port) return alert('请填写有效端口!');
@@ -267,13 +280,16 @@
                         payload.sni = p.sni; payload.private_key = crypto.randomUUID(); // TUIC密码
                     }
                     else if (p.protocol === 'VLESS-Argo') {
-                        if (!p.sni || !p.sni.includes('cloudflare.com')) return alert('请正确填写 Argo 提供的 .trycloudflare.com 域名！');
-                        payload.sni = p.sni; 
+                        payload.sni = '⏳ 正在等待 VPS 自动回传穿透域名...'; 
                     }
                     else if (p.protocol === 'Socks5') {
-                        // Socks5：uuid 前缀做账，随机串做密
                         payload.uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 8); 
                         payload.private_key = crypto.randomUUID().replace(/-/g, '').substring(0, 12); 
+                    }
+                    else if (p.protocol === 'dokodemo-door') {
+                        payload.relay_type = p.relay_type;
+                        if (p.relay_type === 'external') { payload.target_ip = p.target_ip; payload.target_port = p.target_port; }
+                        else { payload.target_id = p.target_id; }
                     }
 
                     await fetchApi('/api/nodes', { method: 'POST', body: JSON.stringify(payload) }); refreshData();
@@ -282,6 +298,7 @@
                 const deleteNode = async (id) => { await fetchApi(`/api/nodes?id=${id}`, { method: 'DELETE' }); refreshData(); };
                 const getNodesByIp = (ip) => nodes.value.filter(n => n.vps_ip === ip);
                 const getVpsName = (ip) => servers.value.find(s => s.ip === ip)?.name || ip;
+                const getAllOtherNodes = (currentIp) => nodes.value.filter(n => n.vps_ip !== currentIp && n.protocol !== 'dokodemo-door');
 
                 // --- 智能省流轮询控制 ---
                 let timer = null;
@@ -295,7 +312,7 @@
 
                 // 生命周期钩子
                 onMounted(() => { if (authKey.value && currentUser.value) { isLoggedIn.value = true; refreshData(); startPolling(); } document.addEventListener('visibilitychange', handleVisibility); });
-                return { isLoggedIn, loginUser, password, currentUser, role, activeTab, servers, nodes, users, newVps, newNodeParams, newUser, login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addVps, deleteVps, addNode, deleteNode, getNodesByIp, getVpsName, formatBytes, formatDate, getTrafficPercent, isOnline, generateSubLink, copyCommand };
+                return { isLoggedIn, loginUser, password, currentUser, role, activeTab, servers, nodes, users, newVps, newNodeParams, newUser, login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addVps, deleteVps, addNode, deleteNode, getNodesByIp, getVpsName, getAllOtherNodes, formatBytes, formatDate, getTrafficPercent, isOnline, generateSubLink, copyCommand };
             }
         }).mount('#app');
     </script>
