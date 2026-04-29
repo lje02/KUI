@@ -8,7 +8,7 @@ import re
 import sys
 
 # ===============================================
-# 强制系统编码锁 (修复 systemd 下的 UnicodeEncodeError 崩溃)
+# 强制系统编码锁
 # ===============================================
 if sys.stdout.encoding != 'UTF-8':
     try:
@@ -23,7 +23,7 @@ try:
     with open(CONF_FILE, 'r') as f:
         env = json.load(f)
 except Exception:
-    print("Failed to read config file. Please check the installation process.")
+    print("Failed to read config file.")
     exit(1)
 
 API_URL = env["api_url"]
@@ -37,7 +37,6 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
 }
 
-# 全局状态字典与缓存变量
 last_reported_bytes = {}
 argo_tunnels = {}
 prev_cpu_total = 0
@@ -57,17 +56,13 @@ def ensure_cloudflared():
 def start_argo_tunnel(port):
     ensure_cloudflared()
     cmd = ["/usr/local/bin/cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"]
-    # 后台挂起运行，并捕获 stderr
     p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
     
     url = None
     start_time = time.time()
-    # 限制 15 秒抓取，防止阻塞主进程
     while time.time() - start_time < 15:
         line = p.stderr.readline()
-        if not line:
-            break
-        # 正则精准打击临时域名
+        if not line: break
         match = re.search(r'https://([a-zA-Z0-9-]+\.trycloudflare\.com)', line)
         if match:
             url = match.group(1)
@@ -82,18 +77,14 @@ def process_argo_nodes(configs):
         if node.get('protocol') == 'VLESS-Argo':
             port = str(node['port'])
             expected_argo_ports.append(port)
-            
-            # 建立新隧道
             if port not in argo_tunnels:
                 p, url = start_argo_tunnel(port)
                 if url:
                     argo_tunnels[port] = {"proc": p, "url": url}
                     argo_urls_to_report.append({"id": node["id"], "url": url})
             else:
-                # 维持旧隧道状态回传
                 argo_urls_to_report.append({"id": node["id"], "url": argo_tunnels[port]["url"]})
                 
-    # 清理在面板上已被删除的僵尸隧道
     for port in list(argo_tunnels.keys()):
         if port not in expected_argo_ports:
             argo_tunnels[port]["proc"].terminate()
@@ -103,7 +94,7 @@ def process_argo_nodes(configs):
 
 
 # ===============================================
-# 高级系统监控模块 (已吸收 bash 探针核心精华算法)
+# 🌟 核心进化：纯 Python 原生内核抓取模块 (100%兼容所有Linux)
 # ===============================================
 def get_system_status():
     global prev_cpu_total, prev_cpu_idle, prev_rx, prev_tx
@@ -113,57 +104,86 @@ def get_system_status():
         "tcp_conn": 0, "udp_conn": 0
     }
     
-    # 1. 精确计算 CPU 使用率 (模拟 /proc/stat 的差值算法)
+    # 1. 纯内核级 CPU 抓取
     try:
         with open('/proc/stat', 'r') as f:
             for line in f:
                 if line.startswith('cpu '):
                     parts = [float(p) for p in line.split()[1:]]
-                    idle = parts[3] + parts[4]  # idle + iowait
+                    idle = parts[3] + parts[4]
                     total = sum(parts)
-                    
                     if prev_cpu_total > 0:
                         diff_total = total - prev_cpu_total
                         diff_idle = idle - prev_cpu_idle
                         if diff_total > 0:
                             stats["cpu"] = int(100.0 * (1.0 - diff_idle / diff_total))
-                    
                     prev_cpu_total = total
                     prev_cpu_idle = idle
                     break
-    except Exception:
-        try:
-            cpu_val = os.popen("top -bn1 | grep load | awk '{printf \"%.2f\", $(NF-2)}'").read().strip()
-            stats["cpu"] = int(float(cpu_val)) if cpu_val else 0
-        except: pass
-
-    # 2. 精确抓取内存与磁盘
-    try: stats["mem"] = float(os.popen("free -m | awk 'NR==2{printf \"%.2f\", $3*100/$2 }'").read().strip() or 0)
-    except Exception: pass
-    try: stats["disk"] = int(os.popen("df -hm / | tail -n1 | awk '{print $5}' | tr -d '%'").read().strip() or 0)
     except Exception: pass
 
-    # 3. Uptime 与系统负载 Load
-    try: stats["uptime"] = os.popen("uptime -p | sed 's/up //'").read().strip()
-    except Exception: pass
-    try: stats["load"] = os.popen("cat /proc/loadavg | awk '{print $1, $2, $3}'").read().strip()
+    # 2. 纯内核级 内存 抓取
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            mem_data = f.read()
+        total_match = re.search(r'MemTotal:\s+(\d+)', mem_data)
+        avail_match = re.search(r'MemAvailable:\s+(\d+)', mem_data)
+        if total_match and avail_match:
+            total = float(total_match.group(1))
+            avail = float(avail_match.group(1))
+            stats["mem"] = round(((total - avail) / total) * 100, 2)
     except Exception: pass
 
-    # 4. TCP/UDP 连接数
+    # 3. 纯原生 磁盘使用率 抓取 (摆脱 df 命令)
+    try:
+        st = os.statvfs('/')
+        total_disk = st.f_blocks * st.f_frsize
+        used_disk = (st.f_blocks - st.f_bfree) * st.f_frsize
+        if total_disk > 0:
+            stats["disk"] = int((used_disk / total_disk) * 100)
+    except Exception: pass
+
+    # 4. 纯内核级 运行时长 抓取 (摆脱 uptime -p 报错)
+    try:
+        with open('/proc/uptime', 'r') as f:
+            uptime_seconds = float(f.readline().split()[0])
+            days = int(uptime_seconds // 86400)
+            hours = int((uptime_seconds % 86400) // 3600)
+            mins = int((uptime_seconds % 3600) // 60)
+            stats["uptime"] = f"{days} Day, {hours}:{mins:02d}"
+    except Exception: pass
+
+    # 5. 纯内核级 Load 抓取
+    try:
+        with open('/proc/loadavg', 'r') as f:
+            stats["load"] = " ".join(f.readline().split()[:3])
+    except Exception: pass
+
+    # 6. 连接数抓取 (保留 ss, 它在所有系统都很稳定)
     try:
         stats["tcp_conn"] = int(os.popen("ss -ant 2>/dev/null | grep -v State | wc -l").read().strip() or 0)
         stats["udp_conn"] = int(os.popen("ss -anu 2>/dev/null | grep -v State | wc -l").read().strip() or 0)
     except Exception: pass
 
-    # 5. 精确到字节的网络实时测速
+    # 7. 纯内核级 实时网速 抓取 (摆脱 awk 语法报错)
     try:
-        net_stat = os.popen("awk 'NR>2 {rx+=$2; tx+=$10} END {printf \"%.0f %.0f\", rx, tx}' /proc/net/dev").read().strip().split()
-        if len(net_stat) == 2:
-            rx_now, tx_now = float(net_stat[0]), float(net_stat[1])
-            if prev_rx > 0 and prev_tx > 0:
-                stats["net_in_speed"] = int((rx_now - prev_rx) / 60) # 探针心跳周期为60秒
-                stats["net_out_speed"] = int((tx_now - prev_tx) / 60)
-            prev_rx, prev_tx = rx_now, tx_now
+        rx_now = 0
+        tx_now = 0
+        with open('/proc/net/dev', 'r') as f:
+            lines = f.readlines()[2:]
+            for line in lines:
+                parts = line.split()
+                # 排除 loopback 本地回环网卡，只计算真实网卡流量
+                if len(parts) > 10 and not parts[0].startswith('lo'):
+                    rx_now += int(parts[1])
+                    tx_now += int(parts[9])
+        
+        if prev_rx > 0 and prev_tx > 0:
+            stats["net_in_speed"] = int((rx_now - prev_rx) / 60)
+            stats["net_out_speed"] = int((tx_now - prev_tx) / 60)
+        
+        prev_rx = rx_now
+        prev_tx = tx_now
     except Exception: pass
 
     return stats
@@ -284,7 +304,6 @@ def build_singbox_config(nodes):
             })
 
         elif proto in ["Hysteria2", "TUIC"]:
-            # 自动化自签证书模块复用
             cert_path = f"/opt/kui/cert_{node['id']}.pem"
             key_path = f"/opt/kui/key_{node['id']}.pem"
             sni = node.get("sni", "www.apple.com")
@@ -310,7 +329,6 @@ def build_singbox_config(nodes):
                 })
 
         elif proto == "VLESS-Argo":
-            # 必须且只能监听本地地址 127.0.0.1，防止公网暴露，交由 cloudflared 穿透
             singbox_config["inbounds"].append({
                 "type": "vless", "tag": in_tag, "listen": "127.0.0.1", "listen_port": int(node["port"]),
                 "users": [{"uuid": node["uuid"]}],
@@ -338,7 +356,6 @@ def build_singbox_config(nodes):
             
             singbox_config["route"]["rules"].append({ "inbound": [in_tag], "outbound": out_tag })
 
-    # 智能清理废弃节点的证书文件
     try:
         for filename in os.listdir("/opt/kui/"):
             if (filename.startswith("cert_") or filename.startswith("key_")) and filename.endswith(".pem"):
@@ -353,7 +370,6 @@ def build_singbox_config(nodes):
         with open(SINGBOX_CONF_PATH, "r") as f:
             old_config_str = f.read()
 
-    # 热重载判定
     if new_config_str != old_config_str:
         with open(SINGBOX_CONF_PATH, "w") as f:
             f.write(new_config_str)
@@ -370,15 +386,11 @@ if __name__ == "__main__":
     time.sleep(2)
     
     while True:
-        # 拉取并应用最新节点配置
         fetched_nodes = fetch_and_apply_configs()
         if fetched_nodes is not None:
             current_active_nodes = fetched_nodes
             
-        # 守护 Argo 穿透隧道，抓取最新 URL
         argo_urls = process_argo_nodes(current_active_nodes)
-        
-        # 将流量和 Argo 域名精准汇报给面板数据库
         report_status(current_active_nodes, argo_urls)
         
         # 60 秒轮询心跳
