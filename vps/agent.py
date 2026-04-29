@@ -7,7 +7,9 @@ import subprocess
 import re
 import sys
 
-# 强制设置标准输出为 UTF-8，防止某些极端环境下的系统级编码崩溃
+# ===============================================
+# 强制系统编码锁 (修复 systemd 下的 UnicodeEncodeError 崩溃)
+# ===============================================
 if sys.stdout.encoding != 'UTF-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -21,7 +23,6 @@ try:
     with open(CONF_FILE, 'r') as f:
         env = json.load(f)
 except Exception:
-    # 修复：改为纯英文输出，彻底杜绝 systemd 下的 UnicodeEncodeError
     print("Failed to read config file. Please check the installation process.")
     exit(1)
 
@@ -36,16 +37,17 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
 }
 
-# 全局状态字典
+# 全局状态字典与缓存变量
 last_reported_bytes = {}
 argo_tunnels = {}
+prev_cpu_total = 0
+prev_cpu_idle = 0
 
 # ===============================================
 # Argo 全自动穿透核心模块
 # ===============================================
 def ensure_cloudflared():
     if not os.path.exists("/usr/local/bin/cloudflared"):
-        # 修复：改为纯英文输出
         print("First Argo node detected. Installing cloudflared silently...")
         os.system("curl -L -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64")
         os.system("chmod +x /usr/local/bin/cloudflared")
@@ -99,16 +101,51 @@ def process_argo_nodes(configs):
 
 
 # ===============================================
-# 系统监控与流量抓取模块
+# 高级系统监控模块 (已吸收 bash 探针核心精华算法)
 # ===============================================
 def get_system_status():
+    global prev_cpu_total, prev_cpu_idle
+    stats = {"cpu": 0, "mem": 0}
+    
+    # [精华吸收 1]：精确计算 CPU 使用率 (模拟 /proc/stat 的差值算法)
     try:
-        cpu = float(os.popen("top -bn1 | grep load | awk '{printf \"%.2f\", $(NF-2)}'").read().strip())
-        mem = float(os.popen("free -m | awk 'NR==2{printf \"%.2f\", $3*100/$2 }'").read().strip())
-        return {"cpu": int(cpu), "mem": mem}
+        with open('/proc/stat', 'r') as f:
+            for line in f:
+                if line.startswith('cpu '):
+                    parts = [float(p) for p in line.split()[1:]]
+                    idle = parts[3] + parts[4]  # idle + iowait
+                    total = sum(parts)
+                    
+                    if prev_cpu_total > 0:
+                        diff_total = total - prev_cpu_total
+                        diff_idle = idle - prev_cpu_idle
+                        if diff_total > 0:
+                            stats["cpu"] = int(100.0 * (1.0 - diff_idle / diff_total))
+                    
+                    prev_cpu_total = total
+                    prev_cpu_idle = idle
+                    break
     except Exception:
-        return {"cpu": 0, "mem": 0}
+        # 降级备用方案
+        try:
+            cpu_val = os.popen("top -bn1 | grep load | awk '{printf \"%.2f\", $(NF-2)}'").read().strip()
+            stats["cpu"] = int(float(cpu_val)) if cpu_val else 0
+        except:
+            pass
 
+    # [精华吸收 2]：精确抓取内存真实使用率
+    try:
+        mem_val = os.popen("free -m | awk 'NR==2{printf \"%.2f\", $3*100/$2 }'").read().strip()
+        stats["mem"] = float(mem_val) if mem_val else 0
+    except Exception:
+        pass
+
+    return stats
+
+
+# ===============================================
+# 节点流量精准抓取模块
+# ===============================================
 def get_port_traffic(port, protocol="tcp"):
     try:
         check_in = f"iptables -C INPUT -p {protocol} --dport {port}"
@@ -137,7 +174,7 @@ def report_status(current_nodes, argo_urls):
     global last_reported_bytes
     status = get_system_status()
     status["ip"] = VPS_IP
-    status["argo_urls"] = argo_urls  # 注入抓取到的 Argo 域名
+    status["argo_urls"] = argo_urls
     
     node_traffic_deltas = []
     current_ids = set()
@@ -298,10 +335,14 @@ def build_singbox_config(nodes):
 
 
 # ===============================================
-# 主循环引擎
+# 主循环守护进程
 # ===============================================
 if __name__ == "__main__":
     current_active_nodes = []
+    
+    # 强制进行一次初始配置拉取
+    time.sleep(2)
+    
     while True:
         # 拉取并应用最新节点配置
         fetched_nodes = fetch_and_apply_configs()
@@ -311,7 +352,8 @@ if __name__ == "__main__":
         # 守护 Argo 穿透隧道，抓取最新 URL
         argo_urls = process_argo_nodes(current_active_nodes)
         
-        # 将流量和 Argo 域名汇报给 Cloudflare 数据库
+        # 将流量和 Argo 域名精准汇报给面板数据库
         report_status(current_active_nodes, argo_urls)
         
+        # 60 秒轮询心跳
         time.sleep(60)
