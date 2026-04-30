@@ -1,6 +1,6 @@
 // ==========================================
-// KUI Serverless 聚合网关后端 - 终极版
-// (包含：自动建表 + 12大协议订阅生成 + 智能心跳引擎)
+// KUI Serverless 聚合网关后端 - 终极完整版
+// (包含：自动建表 + 12大协议订阅生成 + 智能心跳引擎 + TG告警)
 // ==========================================
 
 async function sha256(text) {
@@ -310,6 +310,9 @@ export async function onRequest(context) {
         const { results } = await db.prepare(query).bind(...sqlParams).all();
         let subLinks = [];
         
+        // 🌟 定义 WS 节点自动套用的优选 CDN
+        const defaultCdn = "bestcf.top";
+
         for (let node of results) {
             const vpsInfo = await db.prepare("SELECT name FROM servers WHERE ip = ?").bind(node.vps_ip).first();
             const rawRemark = `${vpsInfo ? vpsInfo.name : 'KUI'} | ${node.protocol}_${node.port}`;
@@ -342,14 +345,14 @@ export async function onRequest(context) {
                     break;
                 case "VMess-WS":
                     const vmessObj = { 
-                        v: "2", ps: rawRemark, add: node.vps_ip, port: String(node.port), 
+                        v: "2", ps: rawRemark, add: defaultCdn, port: String(node.port), 
                         id: node.uuid, aid: "0", scy: "none", net: "ws", type: "none", 
                         host: node.sni || node.vps_ip, path: "/" + cleanUuid + "-vmess", tls: "" 
                     };
                     link = `vmess://${btoa(JSON.stringify(vmessObj))}`;
                     break;
                 case "VLESS-WS-TLS":
-                    link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=tls&sni=${node.sni}&type=ws&host=${node.sni}&path=%2F${cleanUuid}-vless%3Fed%3D2560#${remark}`;
+                    link = `vless://${node.uuid}@${defaultCdn}:${node.port}?encryption=none&security=tls&sni=${node.sni}&type=ws&host=${node.sni}&path=%2F${cleanUuid}-vless%3Fed%3D2560#${remark}`;
                     break;
                 case "H2-Reality":
                     link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=reality&sni=${node.sni}&fp=chrome&pbk=${node.public_key}&sid=${node.short_id || ""}&type=http#${remark}`;
