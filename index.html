@@ -540,8 +540,7 @@
                 
                 const getNodesByIp = (ip) => nodes.value.filter(n => n.vps_ip === ip).sort((a, b) => a.port - b.port); // 按端口排序展示
                 const getVpsName = (ip) => servers.value.find(s => s.ip === ip)?.name || ip;
-                const getAllOtherNodes = (currentIp) => nodes.value.filter(n => n.vps_ip !== currentIp && n.protocol !== 'dokodemo-door');
-
+                
                 let dataTimer = null; let pingTimer = null;
                 const startPolling = () => { 
                     if (!dataTimer) { refreshData(); dataTimer = setInterval(() => { if (isLoggedIn.value && !document.hidden && (activeTab.value === 'nodes' || activeTab.value === 'dashboard')) refreshData(); }, 2500); }
@@ -596,7 +595,24 @@
                     }); 
                 });
 
-                return { isLoggedIn, loginUser, password, currentUser, role, activeTab, servers, nodes, users, newUser, login, logout, refreshData, addUser, toggleUser, deleteUser, resetUserTraffic, addVps, deleteVps, deleteNode, toggleNode, resetTraffic, getNodesByIp, getVpsName, getAllOtherNodes, formatBytes, formatDate, getTrafficPercent, isOnline, generateCmd, generateSubLink, copyCommand, globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, deployOsMap, saveOsMap, siteTitle, siteTitleInput, saveSiteTitle, userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, batchStartPort, batchUser, deployAllProtocols };
+                return { 
+                    isLoggedIn, loginUser, password, currentUser, role, activeTab, 
+                    servers, nodes, users, 
+                    newVps, // <--- 这里补回来了，绝对不会再崩溃了！
+                    newUser, 
+                    login, logout, refreshData, 
+                    addUser, toggleUser, deleteUser, resetUserTraffic, 
+                    addVps, deleteVps, 
+                    deleteNode, toggleNode, resetTraffic, 
+                    getNodesByIp, getVpsName, 
+                    formatBytes, formatDate, getTrafficPercent, isOnline, 
+                    generateCmd, generateSubLink, copyCommand, 
+                    globalOnline, globalTraffic, globalSpeedIn, globalSpeedOut, 
+                    deployOsMap, saveOsMap, 
+                    siteTitle, siteTitleInput, saveSiteTitle, 
+                    userNewPassword, updateUserPassword, resetMySubLink, generateUUIDForNewUser, 
+                    batchStartPort, batchUser, deployAllProtocols 
+                };
             }
         }).mount('#app');
     </script>
