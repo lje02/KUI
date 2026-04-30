@@ -1,6 +1,6 @@
 // ==========================================
 // KUI Serverless 聚合网关后端 - 终极完整版
-// (包含：自动建表 + 极速9合1协议生成 + 智能心跳引擎 + TG告警)
+// (包含：自动建表 + 极速8合1协议生成 + 智能心跳引擎 + TG告警)
 // ==========================================
 
 async function sha256(text) {
@@ -261,7 +261,7 @@ export async function onRequest(context) {
         return Response.json({ success: true, configs: machineNodes });
     }
 
-    // 🌟 聚合订阅接口
+    // 🌟 全量聚合订阅接口 (已剔除 ShadowTLS 等无效协议)
     if (action === "sub" && method === "GET") {
         const ip = url.searchParams.get("ip");
         const reqUser = url.searchParams.get("user");
@@ -317,7 +317,7 @@ export async function onRequest(context) {
             
             let link = "";
 
-            // 已剔除 SS2022, VMess-WS, VLESS-WS-TLS
+            // 彻底剔除了 ShadowTLS
             switch (node.protocol) {
                 case "VLESS":
                     link = `vless://${node.uuid}@${node.vps_ip}:${node.port}?encryption=none&security=none&type=tcp#${remark}`;
@@ -331,10 +331,6 @@ export async function onRequest(context) {
                     break;
                 case "TUIC":
                     link = `tuic://${node.uuid}:${node.private_key}@${node.vps_ip}:${node.port}?sni=${node.sni}&congestion_control=bbr&alpn=h3&allow_insecure=1#${remark}`;
-                    break;
-                case "ShadowTLS":
-                    const ssAuth = btoa(`2022-blake3-aes-128-gcm:${node.private_key}`);
-                    link = `ss://${ssAuth}@${node.vps_ip}:${node.port}#${remark}`;
                     break;
                 case "Trojan":
                     link = `trojan://${node.private_key}@${node.vps_ip}:${node.port}?security=tls&sni=${node.sni}&allowInsecure=1&type=tcp#${remark}`;
