@@ -32,16 +32,27 @@ KUI 是一款基于 **Cloudflare Pages + D1 数据库** 构建的轻量级、无
 
 ### 第一步：部署控制端 (Cloudflare Pages)
 
-1. Fork 本仓库。
-2. 登录 Cloudflare Dashboard，进入 **Workers & Pages** -> **创建应用程序** -> **Pages** -> **连接到 Git**。
-3. 选择你的仓库，构建设置留空即可（纯 HTML/JS/API）。
-4. 在项目设置中，绑定一个 **D1 数据库**，变量名**必须**为 `DB`。
-5. 设置以下 **环境变量 (Environment Variables)**：
-   - `ADMIN_USERNAME`: 管理员账号（例：`admin`）
-   - `ADMIN_PASSWORD`: 管理员密码（例：`your_strong_password`）
-   - `TG_BOT_TOKEN`: （可选）Telegram Bot Token，用于接收掉线告警。
-   - `TG_CHAT_ID`: （可选）你的 Telegram Chat ID。
-6. 重新部署一次 Pages 即可生效。
+## 🚀 闪电部署
+
+### Step 1: 准备 Cloudflare D1 数据库
+1. 登录 Cloudflare 控制台，进入 `Workers & Pages` -> `D1`。
+2. 点击“创建数据库”，命名为 `kui-db`（创建后即可退出，**无需执行任何建表操作**）。
+
+### Step 2: 部署主控端 (Cloudflare Pages)
+1. Fork 本仓库到你的 Github。
+2. 在 Cloudflare 控制台左侧进入 `Workers & Pages`，点击 `创建` -> `Pages` -> `连接到 Git`。
+3. 选择你 Fork 的仓库进行部署，框架预设选择 `None`。
+4. **绑定数据库与变量** (进入已部署的 Pages 项目 `设置`)：
+   - **函数 -> D1 数据库绑定**：将变量名设为 `DB`，并选择刚才创建的 `kui-db`。
+   - **环境变量**：添加以下变量：
+     - `ADMIN_USERNAME`: 你的管理员账号（默认填写 `admin` 即可）
+     - `ADMIN_PASSWORD`: 你的管理员密码（**必填**，否则无法登录）
+     - *(可选)* `TG_BOT_TOKEN`: 你的 Telegram Bot Token（用于掉线告警）
+     - *(可选)* `TG_CHAT_ID`: 接收告警的 TG 频道或用户 ID
+
+### Step 3: 零配置初始化
+浏览器访问你的 Pages 域名，输入设置的账号密码登入。
+**系统将瞬间在后台为你全自动建表并完成所有初始化配置！**
 
 ### 第二步：部署被控端 (VPS 节点)
 
